@@ -1,0 +1,33 @@
+# Secrets
+.env
+*.env.local
+
+# Python env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# AppWorld runtime artifacts (downloaded / generated locally)
+data/
+logs/
+*.log
+
+# Local self-improving skill cache + ACE playbook (rebuildable from experiment outputs)
+memory/
+memory_backup_*/
+
+# Ignore all run outputs EXCEPT the official submission folder, which must be
+# committed (rules require evaluations/ + per-task dbs/). Change team_yap below
+# if your team name differs.
+experiments/outputs/*
+!experiments/outputs/team_yap/
+
+# Local probes and scratch scripts
+scripts/probe_*.py
+
+# Internal planning docs (kept local, not committed)
+docs/superpowers/
