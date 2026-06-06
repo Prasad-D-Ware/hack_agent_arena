@@ -29,7 +29,7 @@ cat <<'NEXT'
 
 ✅ Setup done. Next:
   source .venv/bin/activate
-  # put your key in .env  ->  ANTHROPIC_API_KEY=sk-...
+  # put your key in .env  ->  OPENROUTER_API_KEY=sk-or-...
   export APPWORLD_EXPERIMENT=team_<yourname>
   export APPWORLD_DATASET=dev MAX_TASKS=2     # quick smoke before the full run
   python agent.py

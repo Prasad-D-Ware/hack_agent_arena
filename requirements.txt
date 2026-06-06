@@ -1,3 +1,3 @@
 appworld
-anthropic
+openai
 python-dotenv
