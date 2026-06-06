@@ -53,7 +53,7 @@ def _model_for(role: str) -> str:
 
 
 def call_llm(role, messages, system=None, *, client=None, sleep_fn=time.sleep,
-             max_tokens=1500, temperature=0.0, max_retries=4) -> str:
+             max_tokens=4000, temperature=0.0, max_retries=4) -> str:
     client = client or _client()
     model = _model_for(role)
     fallback = os.environ.get("MODEL_FALLBACK")

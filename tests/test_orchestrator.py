@@ -50,3 +50,21 @@ def test_finalize_reprompts_when_verifier_rejects():
     ok = finalize(world, bb, FakeMem(), llm=llm, max_finalize=3, interaction_budget=40)
     assert ok is True
     assert world.task_completed() is True
+
+
+def test_solve_reserves_budget_for_finalize():
+    bb = Blackboard(task_instruction="t")
+    llm = FakeLLM({
+        "planner": ["1. gather answer"],
+        "executor": [
+            "```python\nprint('step1')\n```",
+            "```python\nprint('step2')\n```",
+            "SUBGOAL_DONE: answer is 42",
+            "```python\napis.supervisor.complete_task(answer=42)\n```",
+        ],
+        "verifier": ["PASS", "PASS"],
+    })
+    world = FakeWorld(outputs=["step1", "step2"])
+    solve(world, bb, FakeMem(), llm=llm, interaction_budget=5)
+    assert world.task_completed() is True
+    assert len(world.executed) == 3
