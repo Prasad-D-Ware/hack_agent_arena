@@ -2,12 +2,12 @@
 """
 🐉 One-time, OFFLINE HydraDB knowledge bootstrap.
 
-Reads the committed AppWorld API-doc snapshot (assets/api_docs.json) and ingests
-all 457 APIs into HydraDB as one knowledge document per API, then waits until
-they are indexed. This is SETUP — it runs once, before any agent run, and never
-touches agent.py or the reasoning loop. At run time the agent only QUERIES.
+Reads the committed AppWorld API-doc snapshot (assets/api_docs.json), checks
+whether those docs are already in HydraDB, and ingests only missing records as
+one knowledge document per API. Then it waits until newly submitted docs are
+indexed.
 
-It is idempotent (stable per-API ids upsert), so re-running is safe.
+It is idempotent (stable per-API ids plus check-first logic), so re-running is safe.
 
 Usage:
   export HYDRA_DB_API_KEY=sk-...            # key from https://app.hydradb.com
@@ -18,7 +18,7 @@ Notes:
     RUN). Optional: HYDRA_TENANT_ID (default appworld_agent).
   - To then USE the knowledge base during a run: export USE_HYDRA=1 and run agent.py.
 
-Exit codes: 0 ok · 1 artifact missing/unreadable · 2 HydraDB not configured · 3 ingest failed.
+Exit codes: 0 ok · 1 artifact missing/unreadable · 2 HydraDB not configured · 3 ensure failed.
 """
 
 import json
@@ -30,7 +30,29 @@ from hydradb import HydraMemory
 DEFAULT_ARTIFACT = "assets/api_docs.json"
 
 
+def _load_dotenv(path: str = ".env") -> None:
+    """Load simple KEY=VALUE entries from .env without overriding the shell."""
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path) as f:
+            lines = f.readlines()
+    except OSError:
+        return
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        value = value.strip().strip('"').strip("'")
+        os.environ[key] = value
+
+
 def main() -> int:
+    _load_dotenv()
     artifact_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ARTIFACT
 
     # 1) load the artifact
@@ -53,26 +75,30 @@ def main() -> int:
               "the SDK: pip install \"hydradb-sdk>=2,<3\").")
         return 2
 
-    # 3) ingest
-    print(f"Ingesting {meta.get('api_count', '?')} APIs across {meta.get('app_count', '?')} "
-          f"apps from {artifact_path} into tenant '{mem.tenant_id}' ...")
+    # 3) check first, then ingest only missing records
+    print(f"Ensuring {meta.get('api_count', '?')} APIs across {meta.get('app_count', '?')} "
+          f"apps from {artifact_path} in tenant '{mem.tenant_id}' ...")
     try:
-        count, ids = mem.ingest_api_docs(api_docs)
+        count, ids = mem.ensure_api_docs(api_docs)
     except Exception as e:
-        print(f"ERROR: ingest failed: {e}")
+        print(f"ERROR: ensure failed: {e}")
         return 3
-    if count == 0:
+    if count == 0 and not ids:
         print("ERROR: no API docs found in the artifact (nothing ingested).")
         return 3
-    print(f"  submitted {count} per-API knowledge docs (async indexing started)")
+    if count == 0:
+        print("  no ingestion needed")
+    else:
+        print(f"  submitted {count} missing per-API knowledge docs (async indexing started)")
 
     # 4) wait for indexing so the very first agent run can already retrieve them
-    print("  waiting for indexing to complete ...")
-    if mem.wait_until_indexed(ids):
-        print("  ✓ indexed")
-    else:
-        print("  ! indexing not confirmed before timeout — it may still be in "
-              "progress; check the tenant or just proceed (the run degrades safely).")
+    if count:
+        print("  waiting for indexing to complete ...")
+        if mem.wait_until_indexed(ids):
+            print("  ✓ indexed")
+        else:
+            print("  ! indexing not confirmed before timeout — it may still be in "
+                  "progress; check the tenant or just proceed (the run degrades safely).")
 
     print("\nDone. Knowledge base is ready.")
     print("To use it during a run:  export USE_HYDRA=1  &&  python agent.py")
