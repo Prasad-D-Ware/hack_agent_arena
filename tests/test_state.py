@@ -60,3 +60,28 @@ def test_recent_error_signatures_filters_by_subgoal():
     bb.add_step(1, "x", "KeyError: 'a'")
     bb.add_step(1, "y", "ok")
     assert bb.recent_error_signatures(1, 2) == ["KeyError: 'a'"]
+
+
+def test_render_for_includes_task_and_plan():
+    bb = Blackboard(task_instruction="buy milk", supervisor="Alice")
+    bb.plan = [Subgoal(1, "open amazon", status="done"),
+               Subgoal(2, "add milk", status="active")]
+    text = bb.render_for("planner")
+    assert "buy milk" in text and "open amazon" in text and "add milk" in text
+    assert "[x]" in text and "[>]" in text
+
+
+def test_render_for_executor_truncates_long_output():
+    bb = Blackboard(task_instruction="t")
+    bb.add_step(1, "print(x)", "Z" * 1000)
+    text = bb.render_for("executor", Subgoal(1, "do thing"))
+    assert "do thing" in text
+    assert "Z" * 1000 not in text          # long output is truncated
+    assert "…" in text
+
+
+def test_render_for_lists_logged_in_apps():
+    bb = Blackboard(task_instruction="t")
+    bb.credentials = {"spotify": "tok", "gmail": "tok2"}
+    text = bb.render_for("executor", Subgoal(1, "x"))
+    assert "spotify" in text and "gmail" in text

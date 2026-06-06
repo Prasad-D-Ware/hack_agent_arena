@@ -55,6 +55,8 @@ class Blackboard:
     interactions_used: int = 0
     replans_used: int = 0
 
+    _STATUS_MARK = {"done": "x", "active": ">", "failed": "!", "pending": " "}
+
     def add_step(self, subgoal_id: int, code: str, output: str) -> str | None:
         sig = error_signature(output)
         self.steps.append(StepRecord(subgoal_id, code, str(output), sig))
@@ -69,3 +71,26 @@ class Blackboard:
     def has_repeated_error(self, subgoal_id: int, n: int = 2) -> bool:
         sigs = self.recent_error_signatures(subgoal_id, n)
         return len(sigs) >= n and len(set(sigs)) == 1
+
+    def render_for(self, role: str, subgoal: "Subgoal | None" = None) -> str:
+        lines = [f"TASK: {self.task_instruction}"]
+        if self.supervisor:
+            lines.append(f"SUPERVISOR: {self.supervisor}")
+        if self.credentials:
+            lines.append("LOGGED IN: " + ", ".join(sorted(self.credentials)))
+        if self.results:
+            lines.append("KNOWN RESULTS: "
+                         + "; ".join(f"{k}={str(v)[:60]}" for k, v in self.results.items()))
+        if self.plan:
+            lines.append("PLAN:")
+            for sg in self.plan:
+                mark = self._STATUS_MARK.get(sg.status, " ")
+                lines.append(f"  [{mark}] {sg.id}. {sg.description}")
+        if subgoal is not None:
+            lines.append(f"CURRENT SUBGOAL: {subgoal.description}")
+        if role in ("executor", "finalize", "verifier") and self.steps:
+            lines.append("RECENT STEPS:")
+            for s in self.steps[-3:]:
+                out = s.output if len(s.output) <= 200 else s.output[:200] + "…"
+                lines.append(f"  $ {s.code[:120]}\n    -> {out}")
+        return "\n".join(lines)
