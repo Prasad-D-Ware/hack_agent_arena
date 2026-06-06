@@ -10,3 +10,6 @@ __pycache__/
 data/
 experiments/
 logs/
+
+# Internal planning docs (kept local, not committed)
+docs/superpowers/

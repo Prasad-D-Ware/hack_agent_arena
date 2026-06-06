@@ -283,12 +283,52 @@ class HydraMemory:
         except Exception as e:
             print(f"  [hydra] remember failed: {e}")
 
+    def remember_episode(self, instruction: str, state, success: bool) -> None:
+        """Ingest a structured episode (plan + key steps) from the Blackboard.
+
+        Higher-signal than the raw transcript: stores what the plan was, how each
+        subgoal resolved, and the last few executed steps. No-op when disabled.
+        """
+        if not self.on:
+            return
+        try:
+            plan_lines = [
+                f"{sg.id}. [{sg.status}] {sg.description}"
+                + (f" -> {sg.result}" if sg.result else "")
+                for sg in getattr(state, "plan", [])
+            ]
+            step_lines = [
+                f"$ {s.code[:300]}\n-> {str(s.output)[:300]}"
+                for s in getattr(state, "steps", [])[-8:]
+            ]
+            text = (
+                f"AppWorld task ({'SOLVED' if success else 'FAILED'}): {instruction}\n\n"
+                "PLAN:\n" + "\n".join(plan_lines)
+                + "\n\nKEY STEPS:\n" + "\n\n".join(step_lines)
+            )
+            self.client.context.ingest(
+                type="memory",
+                tenant_id=self.tenant_id,
+                memories=json.dumps([{
+                    "text": text,
+                    "infer": False,
+                    "metadata": {
+                        "kind": "episode",
+                        "success": "true" if success else "false",
+                    },
+                }]),
+            )
+        except Exception as e:
+            print(f"  [hydra] remember_episode failed: {e}")
+
     # -- retrieval ------------------------------------------------------------
-    def recall(self, instruction: str) -> str:
+    def recall(self, instruction: str, kind: str = "all") -> str:
         """Query memory + knowledge for this task; return a prompt-ready string.
 
-        Returns "" when disabled, on error, or when nothing relevant is found —
-        the caller must handle the empty-string case gracefully.
+        `kind` targets the store: "memory" (past episodes), "knowledge" (API
+        docs), or "all" (both). The Planner recalls "memory" per task; the
+        Executor recalls "knowledge" per subgoal. Returns "" when disabled, on
+        error, or when nothing relevant is found — callers handle the empty case.
         """
         if not self.on:
             return ""
@@ -296,7 +336,7 @@ class HydraMemory:
             res = self.client.query(
                 tenant_id=self.tenant_id,
                 query=instruction,
-                type="all",            # past episodes (A) + API-doc knowledge (B)
+                type=kind,             # "all" | "memory" | "knowledge"
                 query_by="hybrid",     # semantic + BM25
                 mode="thinking",       # multi-pass expansion
                 max_results=self.max_results,
