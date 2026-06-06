@@ -1,4 +1,7 @@
 appworld
+anthropic
 openai
+azure-identity
+pydantic<2
 python-dotenv
-hydradb-sdk>=2,<3   # 🐉 optional agent memory/knowledge layer (used when USE_HYDRA=1)
+hydradb-sdk

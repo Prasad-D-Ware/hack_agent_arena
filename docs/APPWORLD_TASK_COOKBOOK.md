@@ -1,8 +1,8 @@
 # AppWorld Task Cookbook
 
-This is a working cookbook for AppWorld agent behavior patterns. It is intentionally docs-only so it does not overlap with the Planner -> Executor -> Verifier implementation in `Plan.md`.
+This is a working cookbook for AppWorld agent behavior patterns. It is intentionally docs-only: source material for the agent's prompts, the ACE playbook bullets (`strategy_ledger.py`), and the local API-doc retriever (`apidoc_index.py`).
 
-Use this after the architecture lands as source material for prompts, HydraDB memories, local retrieval artifacts, or evaluator notes. Do not copy protected AppWorld task data, private evaluation code, credentials, tokens, or full API docs into public material.
+Use it as reference material for prompts, HydraDB memories, local retrieval artifacts, or evaluator notes. Do not copy protected AppWorld task data, private evaluation code, credentials, tokens, or full API docs into public material.
 
 ## External Context
 
@@ -28,8 +28,8 @@ Do not implement these here:
 - Planner, Executor, Verifier, or Orchestrator modules
 - Prompt constants in `prompts.py`
 - LLM retry/routing
-- `HydraMemory.recall(kind=...)`
-- `HydraMemory.remember_episode(...)`
+- `HydraBridge.search(...)`
+- `HydraBridge.remember_episode(...)`
 - Blackboard/state classes
 - Tests for those modules
 

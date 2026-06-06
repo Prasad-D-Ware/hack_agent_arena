@@ -1,115 +1,173 @@
-# ://agent_arena
+# HydraDB Agent Arena
 
-Build an **autonomous AI agent** that completes everyday-app tasks in
-[AppWorld](https://appworld.dev). You are ranked by **Task Goal Completion (TGC)** —
-the percentage of tasks your agent fully completes.
+Autonomous AppWorld agent for `://agent_arena`. The agent reads a supervisor
+task, writes Python code against AppWorld APIs, verifies its answer or mutation,
+and completes the task with `apis.supervisor.complete_task(...)`.
 
-## What AppWorld is
-A simulated world of **9 apps** (Spotify, Gmail, Venmo, Amazon, Splitwise, Phone,
-File System, Simple Note, + `supervisor`/`api_docs`), **457 APIs**, and ~100
-simulated people. Your agent reads a natural-language instruction from its
-"supervisor" and acts by **writing Python code** that calls the apps' APIs.
+## What We Added
 
-## 1. Setup (~3 min) — needs Python 3.11
+- Provider/model routing: `MODEL`, `ROUTER_MODEL`, `SOLVER_MODEL`,
+  `ERROR_MODEL`, `VERIFIER_MODEL`, and `DISTILLER_MODEL` accept
+  `provider/model` strings. The default target is OpenRouter Llama 3.3 70B:
+  `openrouter/meta-llama/llama-3.3-70b-instruct`.
+- OpenAI-compatible backends: OpenRouter, Groq, OpenAI, Anthropic, and the
+  legacy Azure Llama backend are routed from one agent loop.
+- HydraDB memory: successful and failed trajectories can be distilled into
+  reusable skills/lessons with `scripts/distill_skills.py`. Runtime recall
+  injects verified memory hints while treating live AppWorld API docs as the
+  source of truth.
+- Verified-only memory by default: in-run captures are off unless explicitly
+  enabled, which avoids poisoning future tasks with unverified completions.
+- Solver prompt improvements: the agent now emphasizes schema inspection,
+  credential/login patterns, lowercase app namespaces, exact answer shape, and
+  concise evidence before completion.
+- Completion verifier: answer tasks are checked before submission for empty or
+  guessed answers, missing evidence, suspicious counts, bad top-N shape, and
+  ignored errors.
+- Pagination, inspection, and ranking safeguards: prompts tell the solver to
+  exhaust paginated list APIs, print sample keys before reading fields, fetch
+  authoritative detail records for ranking metrics, and deduplicate entities.
+- Relative-date handling: the AppWorld task datetime is injected and must be used
+  for "today", "this year", "last month", and similar relative dates.
+- Mutation completeness: payment/message/create/update tasks are prompted to
+  include exact amounts, recipients, titles, notes, descriptions, dates, and
+  follow-up messages before completion.
+- **ACE evolving playbook** (`strategy_ledger.py`): an Agentic Context
+  Engineering (arXiv:2510.04618) "playbook" of itemized, GENERAL strategy /
+  API-pattern / gotcha bullets that is injected into the solver context each
+  task. Backed by the local cache **and HydraDB**, grown offline from execution
+  feedback (no ground-truth labels). Toggle with `ENABLE_PLAYBOOK` (default on).
+
+## Setup
+
+Use Python 3.11.
+
 ```bash
-git clone git@github.com:interface4agi/hack_agent_arena.git
-cd hack_agent_arena
-bash setup.sh                 # installs uv+py3.11, appworld + data, creates .env; verifies
+bash setup.sh
 source .venv/bin/activate
+cp .env.example .env
 ```
-Then add one LLM provider key to **`.env`**. OpenRouter is the default:
-```
-LLM_PROVIDER=openrouter
-OPENROUTER_API_KEY=sk-or-...
-```
-Or use Groq's OpenAI-compatible endpoint:
-```
-LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_...
-MODEL=llama-3.3-70b-versatile
-```
-Pick any model with the `MODEL` env var. For OpenRouter, use `provider/model` slugs,
-e.g. `anthropic/claude-opus-4`, `openai/gpt-4o`, `google/gemini-2.5-pro`,
-`meta-llama/llama-3.3-70b-instruct`. For Groq, use Groq model ids such as
-`llama-3.3-70b-versatile`.
-> **No key? You can run a local model.** AppWorld itself needs no API key — you can
-> explore tasks (`appworld play`) and hand-solve them fully offline. Only the agent's
-> "brain" needs a model. The starter uses the OpenAI-compatible API, so `call_llm`
-> works with OpenRouter, Groq, or a local compatible host: point the provider base
-> URL at a local [Ollama](https://ollama.com) or `litellm`
-> server (e.g. `http://localhost:11434/v1`). Small local models score well below
-> frontier models on AppWorld, but they're great for building and debugging your
-> agent loop for free.
 
-## 2. Smoke-test the starter agent (2 tasks)
-```bash
-export APPWORLD_EXPERIMENT=team_<yourname>     # your UNIQUE team id
-export APPWORLD_DATASET=dev MAX_TASKS=2
-python agent.py
-```
-`agent.py` is a working ReAct code agent — read it, then make it smarter
-(planning, error recovery, better prompts, retrieval over `apis.api_docs`, …).
-
-Explore a task world by hand: `appworld play`
-
-## 3. The rules your agent plays by
-- One Python code block per turn; whatever you `print()` comes back as the next observation.
-- Discover APIs at runtime:
-  `apis.api_docs.show_api_descriptions(app_name='spotify')`, then
-  `apis.api_docs.show_api_doc(app_name='spotify', api_name='login')`.
-- Get credentials: `apis.supervisor.show_account_passwords()`, then log into each app.
-- Finish a task: `apis.supervisor.complete_task(answer=<answer or None>)`.
-
-## 4. Submit (at each checkpoint)
-1. Run your agent on the **official split** the organizers announce
-   (default `test_normal`, 168 tasks):
-   ```bash
-   export APPWORLD_DATASET=test_normal MAX_TASKS=0
-   python agent.py
-   ```
-2. Self-evaluate:
-   ```bash
-   appworld evaluate $APPWORLD_EXPERIMENT test_normal
-   ```
-3. Zip and submit your whole output folder:
-   `experiments/outputs/$APPWORLD_EXPERIMENT/`
-   It must include `evaluations/test_normal.json` and the `tasks/<id>/dbs/` folders.
-
-## Scoring
-- **TGC** (primary) — % of tasks fully completed. **SGC** (scenario goal completion) breaks ties.
-- 🐉 **Bonus:** teams that integrate **HydraDB** into their agent's architecture
-  earn extra credit (ask organizers for details).
-- Reference baseline on `test_normal`: ReAct + GPT-4o ≈ **48.8 TGC**. Beat it.
-
-## 🐉 HydraDB integration (bonus, optional)
-[`hydradb.py`](hydradb.py) wires [HydraDB](https://hydradb.com) — a graph-native
-context layer for agents — into the agent in two ways, both at the **edges** of
-the loop (the ReAct reasoning loop itself is never touched):
-- **API-doc knowledge (B):** the 457 AppWorld API docs are a static snapshot
-  committed at [`assets/api_docs.json`](assets/api_docs.json). Hydra setup uses
-  stable per-API ids and checks first, so [`bootstrap_docs.py`](bootstrap_docs.py)
-  and agent startup ingest only missing `knowledge` records. During subgoals the
-  agent *queries* them — RAG over the 457 APIs — so it skips runtime discovery.
-- **Episodic memory (A):** after each task the agent stores the episode
-  (`context.ingest(type="memory")`); before each task it retrieves the most
-  relevant past experience (`query`) and injects it into the seed prompt — so it
-  stops repeating mistakes across tasks.
-
-It's **off by default** and fully fail-safe — if disabled, unconfigured, or
-erroring, every run-time call is a no-op and the agent behaves exactly as before.
+Add your OpenRouter key to `.env`:
 
 ```bash
-pip install "hydradb-sdk>=2,<3"                 # already in requirements.txt
-
-# 1) Optional explicit ensure: checks first, ingests only missing API docs
-HYDRA_DB_API_KEY=... python bootstrap_docs.py    # idempotent; waits for new indexing
-
-# 2) enable HydraDB for the run; agent.py also checks/ensures API docs at startup
-export USE_HYDRA=1 HYDRA_DB_API_KEY=...           # key from https://app.hydradb.com
-python agent.py
+OPENROUTER_API_KEY=...
+MODEL=openrouter/meta-llama/llama-3.3-70b-instruct
 ```
-Tunables: `HYDRA_TENANT_ID`, `HYDRA_MAX_RESULTS`, `HYDRA_CHUNK_CHARS`,
-`HYDRA_READY_TIMEOUT` (see `.env.example`).
 
----
-Built for **://agent_arena** · benchmark: [AppWorld](https://github.com/StonyBrookNLP/appworld) (ACL'24 Best Resource Paper)
+If OpenRouter changes the slug, set:
+
+```bash
+OPENROUTER_LLAMA_MODEL=meta-llama/llama-3.3-70b-instruct
+```
+
+Other supported examples:
+
+```bash
+MODEL=groq/llama-3.3-70b-versatile
+MODEL=openai/gpt-5.4-mini
+MODEL=anthropic/claude-opus-4-8
+MODEL=azure-llama
+```
+
+## Run And Evaluate
+
+Short development smoke test:
+
+```bash
+export APPWORLD_EXPERIMENT=team_openrouter_smoke
+export APPWORLD_DATASET=dev
+export MAX_TASKS=3
+python agent.py
+appworld evaluate team_openrouter_smoke dev
+```
+
+Official organizer eval set:
+
+```bash
+mkdir -p data/datasets
+cp eval/agent_arena_eval.txt data/datasets/agent_arena_eval.txt
+export APPWORLD_EXPERIMENT=team_<name>
+export APPWORLD_DATASET=agent_arena_eval
+export MAX_TASKS=0
+python agent.py
+appworld evaluate team_<name> agent_arena_eval
+```
+
+See `EVAL.md` and `SUBMISSION.md` for the organizer-provided eval set and
+submission format.
+
+## HydraDB Memory Workflow
+
+Enable HydraDB by adding a key to `.env`:
+
+```bash
+HYDRA_DB_API_KEY=...
+ENABLE_MEMORY=1
+MEMORY_VERIFIED_ONLY=1
+```
+
+After a run, distill verified trajectories into the local memory cache and
+HydraDB:
+
+```bash
+python scripts/distill_skills.py --experiment team_<name> --dataset dev
+```
+
+Use `--no-llm` for deterministic extraction, or `--dry-run` to inspect what would
+be stored. The script scrubs secrets before persisting skills.
+
+## ACE Playbook (Agentic Context Engineering)
+
+The playbook is an evolving **context** rather than a per-task skill recall. It
+follows the ACE paper (arXiv:2510.04618): contexts are comprehensive, itemized
+playbooks of reusable bullets that accumulate strategies, domain concepts, API
+patterns, and common failure modes — never task-specific answers.
+
+Roles map onto the existing system:
+
+- **Generator** — the ReAct loop in `agent.py` solves a task and emits a trace.
+- **Reflector** — `scripts/grow_ledger.py` distills concrete, GENERAL bullets
+  from each trajectory using **execution feedback only** (completion + recurring
+  errors); no ground-truth labels are required (`--use-eval` is optional).
+- **Curator** — `StrategyLedger.absorb`: a lightweight, non-LLM merge with
+  string/semantic de-duplication ("grow-and-refine"); `StrategyLedger.consolidate`
+  consolidates near-duplicates and caps each section.
+
+Each bullet carries metadata (`bullet_id`, `helpful`/`harmful` counters,
+`section`, `apps`, `source`). A defensive `is_reusable` guard rejects any bullet
+that references a concrete `task_id`, embeds a literal `complete_task` answer, or
+otherwise looks task-specific, so the playbook can never leak memorized answers.
+
+Storage (HydraDB bonus): every bullet is mirrored into HydraDB `knowledge`
+(`pb_<id>.md`) for cross-run persistence and semantic recall, alongside the
+deterministic local cache at `memory/playbook.jsonl`. At inference the top-K
+most relevant bullets (apps-aware, then general) are rendered into the solver
+context within a token budget; set `PLAYBOOK_HYDRA_TOPK>0` to additionally fold
+in HydraDB-recalled bullets at inject time.
+
+Offline warmup and inspection:
+
+```bash
+# seed the general defaults + push to HydraDB
+python scripts/grow_ledger.py --seed --sync-hydra
+
+# reflect over a finished dev run's trajectories (Reflector + Curator)
+python scripts/grow_ledger.py --experiment team_<dev_run> --dataset dev
+
+# consolidate near-duplicates (grow-and-refine)
+python strategy_ledger.py --refine --refine-threshold 0.45 --per-section-cap 8
+
+# inspect what gets injected for a given app mix
+python strategy_ledger.py --show --apps spotify,phone
+```
+
+Relevant env flags: `ENABLE_PLAYBOOK` (default 1), `PLAYBOOK_AUTOSEED`,
+`PLAYBOOK_MAX_BULLETS`, `PLAYBOOK_CHAR_BUDGET`, `PLAYBOOK_HYDRA_TOPK`,
+`PLAYBOOK_DEDUP_THRESHOLD`.
+
+## Repo Hygiene
+
+Do not commit `.env`, API keys, `memory/`, `memory_backup_*`, probe scripts,
+terminal logs, caches, or local AppWorld outputs unless they are the exact
+official submission artifacts requested by organizers.

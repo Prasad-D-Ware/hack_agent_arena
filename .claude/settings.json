@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout *)",
+      "Bash(cp __TRACKED_VAR__/agent.py agent.py)",
+      "Bash(cp __TRACKED_VAR__/skill_store.py skill_store.py)",
+      "Bash(cp __TRACKED_VAR__/strategy_ledger.py strategy_ledger.py)",
+      "Bash(cp __TRACKED_VAR__/scripts/grow_ledger.py scripts/grow_ledger.py)",
+      "Bash(cp __TRACKED_VAR__/scripts/distill_skills.py scripts/distill_skills.py)",
+      "Bash(grep -vE '^\\(\\\\.venv|\\\\.git|data|outputs|experiments|\\\\.tmp\\)$')",
+      "Bash(python3 apidoc_index.py spotify \"top 5 songs by play count\")"
+    ]
+  }
+}
