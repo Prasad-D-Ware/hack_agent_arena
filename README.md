@@ -17,17 +17,21 @@ cd hack_agent_arena
 bash setup.sh                 # installs uv+py3.11, appworld + data, creates .env; verifies
 source .venv/bin/activate
 ```
-Then add your LLM key to **`.env`**:
+Then add your [OpenRouter](https://openrouter.ai/keys) key to **`.env`**:
 ```
-ANTHROPIC_API_KEY=sk-...
+OPENROUTER_API_KEY=sk-or-...
 ```
+Pick any model with the `MODEL` env var using OpenRouter's `provider/model` slugs,
+e.g. `anthropic/claude-opus-4`, `openai/gpt-4o`, `google/gemini-2.5-pro`,
+`meta-llama/llama-3.3-70b-instruct`.
 > **No key? You can run a local model.** AppWorld itself needs no API key — you can
 > explore tasks (`appworld play`) and hand-solve them fully offline. Only the agent's
-> "brain" needs a model. The starter uses Anthropic by default, but `call_llm` in
-> `agent.py` is swappable: point it at any provider, including a local model via
-> [Ollama](https://ollama.com) (its OpenAI-compatible endpoint, or `litellm`). Small
-> local models score well below frontier models on AppWorld, but they're great for
-> building and debugging your agent loop for free.
+> "brain" needs a model. The starter talks to OpenRouter via the OpenAI-compatible
+> API, so `call_llm` in `agent.py` already works with any OpenAI-compatible host:
+> point `OPENROUTER_BASE_URL` at a local [Ollama](https://ollama.com) or `litellm`
+> server (e.g. `http://localhost:11434/v1`). Small local models score well below
+> frontier models on AppWorld, but they're great for building and debugging your
+> agent loop for free.
 
 ## 2. Smoke-test the starter agent (2 tasks)
 ```bash
