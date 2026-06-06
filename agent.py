@@ -26,6 +26,11 @@ Run:
   export APPWORLD_DATASET=dev                  # dev while building; switch to the
                                                # official split at submission time
   python agent.py
+
+🐉 Bonus — HydraDB context layer (optional, off by default):
+  export USE_HYDRA=1 HYDRA_DB_API_KEY=...       # see hydradb.py for what it does
+  The agent then remembers what worked across tasks and retrieves relevant past
+  experience + API docs before each task. Disabled => the loop runs unchanged.
 """
 
 import os
@@ -39,6 +44,8 @@ except Exception:
 
 from appworld import AppWorld, load_task_ids
 from openai import OpenAI
+
+from hydradb import HydraMemory  # 🐉 optional HydraDB context layer (no-op unless USE_HYDRA=1)
 
 # ---- config ---------------------------------------------------------------
 # Model-agnostic via OpenRouter: use any "provider/model" slug, e.g.
@@ -96,15 +103,22 @@ def extract_code(text: str) -> str:
     return m.group(1).strip() if m else text.strip()
 
 
-def solve(world: AppWorld) -> None:
-    messages = [{
-        "role": "user",
-        "content": (
-            f"Supervisor: {world.task.supervisor}\n\n"
-            f"Task: {world.task.instruction}\n\n"
-            "Begin. Remember: one python code block per turn."
-        ),
-    }]
+def solve(world: AppWorld, mem: HydraMemory) -> None:
+    # --- HydraDB hooks live ONLY at the edges; the reasoning loop is untouched. ---
+    mem.ingest_api_docs(world)                       # B) seed API-doc knowledge (once per run)
+    recalled = mem.recall(world.task.instruction)    # A+B) retrieve context for THIS task
+
+    intro = (
+        f"Supervisor: {world.task.supervisor}\n\n"
+        f"Task: {world.task.instruction}\n\n"
+    )
+    if recalled:
+        intro += recalled + "\n\n"
+    intro += "Begin. Remember: one python code block per turn."
+    messages = [{"role": "user", "content": intro}]
+
+    # --- reasoning loop: identical to the starter (no HydraDB inside it) ---
+    completed = False
     for step in range(MAX_INTERACTIONS):
         reply = call_llm(messages)
         code = extract_code(reply)
@@ -114,20 +128,26 @@ def solve(world: AppWorld) -> None:
         messages.append({"role": "user", "content": f"Execution output:\n{output}"})
         if world.task_completed():
             print("  ✓ task_completed")
-            return
-    print("  ✗ hit MAX_INTERACTIONS without completion")
+            completed = True
+            break
+    else:
+        print("  ✗ hit MAX_INTERACTIONS without completion")
+
+    # A) remember the episode after the loop, from the messages it produced.
+    mem.remember_task(world.task.instruction, messages, completed)
 
 
 def main() -> None:
     task_ids = load_task_ids(DATASET)
     if MAX_TASKS:
         task_ids = task_ids[:MAX_TASKS]
+    mem = HydraMemory()  # 🐉 shared across tasks so memory accumulates over the run
     print(f"Running '{EXPERIMENT}' on {len(task_ids)} '{DATASET}' tasks with {MODEL}")
     for i, task_id in enumerate(task_ids, 1):
         print(f"[{i}/{len(task_ids)}] {task_id}")
         with AppWorld(task_id=task_id, experiment_name=EXPERIMENT) as world:
             try:
-                solve(world)
+                solve(world, mem)
             except Exception as e:  # never let one task kill the whole run
                 print(f"  ! error: {e}")
     print(f"\nDone. Outputs in ./experiments/outputs/{EXPERIMENT}/")

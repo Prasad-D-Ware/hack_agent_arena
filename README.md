@@ -73,5 +73,26 @@ Explore a task world by hand: `appworld play`
   earn extra credit (ask organizers for details).
 - Reference baseline on `test_normal`: ReAct + GPT-4o ≈ **48.8 TGC**. Beat it.
 
+## 🐉 HydraDB integration (bonus, optional)
+[`hydradb.py`](hydradb.py) wires [HydraDB](https://hydradb.com) — a graph-native
+context layer for agents — into the loop, in two ways:
+- **Episodic memory:** after each task the agent stores a summary of what it did
+  (`context.ingest(type="memory")`); before each task it retrieves the most
+  relevant past experience (`query`) and injects it into the prompt — so it stops
+  rediscovering the same APIs and repeating mistakes across tasks.
+- **API-doc knowledge:** once per run it ingests the AppWorld per-app API
+  descriptions as `knowledge`, then retrieves only the relevant ones per task
+  (RAG over the 457 APIs) instead of dumping everything each turn.
+
+It's **off by default** and fully fail-safe — if disabled, unconfigured, or
+erroring, every call is a no-op and the agent behaves exactly as before. Enable it:
+```bash
+pip install "hydradb-sdk>=2,<3"        # already in requirements.txt
+export USE_HYDRA=1 HYDRA_DB_API_KEY=...  # key from https://app.hydradb.com
+python agent.py
+```
+Tunables: `HYDRA_TENANT_ID`, `HYDRA_MAX_RESULTS`, `HYDRA_READY_TIMEOUT` (see
+`.env.example`).
+
 ---
 Built for **://agent_arena** · benchmark: [AppWorld](https://github.com/StonyBrookNLP/appworld) (ACL'24 Best Resource Paper)
