@@ -257,8 +257,9 @@ class HydraMemory:
                 break
             seen.update(_status_by_id(st))
         if status_supported and seen:
+            _FAIL = {"failed", "failure", "error", "errored"}
             indexed = {doc_id for doc_id, status in seen.items() if _looks_indexed(status)}
-            failed = {doc_id for doc_id, status in seen.items() if str(status).lower() == "failed"}
+            failed = {doc_id for doc_id, status in seen.items() if str(status).lower() in _FAIL}
             pending = set(seen) - indexed - failed
             missing = [doc_id for doc_id in ids if doc_id not in indexed and doc_id not in pending]
             result.update({
@@ -406,9 +407,9 @@ class HydraMemory:
                 print(f"  [hydra] status check failed: {e}")
                 return True  # don't block the operator; indexing usually still completes
             if statuses:
-                if all(s == "completed" for s in statuses):
+                if all(_looks_indexed(s) for s in statuses):
                     return True
-                if any(s == "failed" for s in statuses):
+                if any(s in {"failed", "failure", "error", "errored"} for s in statuses):
                     print(f"  [hydra] indexing reported failure: {statuses}")
                     return False
                 unknown = 0

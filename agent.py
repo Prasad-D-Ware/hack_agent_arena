@@ -52,7 +52,7 @@ def ensure_hydra_knowledge(mem: HydraMemory) -> None:
     try:
         with open(API_DOCS_ARTIFACT) as f:
             api_docs = json.load(f)
-        count, ids = mem.ensure_api_docs(api_docs, ingest_on_probe_miss=False)
+        count, ids = mem.ensure_api_docs(api_docs)
     except Exception as e:
         print(f"  [hydra] API-doc ensure failed; continuing without bootstrap: {e}")
         return
