@@ -15,6 +15,7 @@ class Subgoal:
     status: Literal["pending", "active", "done", "failed"] = "pending"
     result: str | None = None
     attempts: int = 0
+    last_feedback: str | None = None   # verifier rejection reason for next retry
 
 
 @dataclass
@@ -78,6 +79,10 @@ class Blackboard:
             lines.append(f"SUPERVISOR: {self.supervisor}")
         if self.credentials:
             lines.append("LOGGED IN: " + ", ".join(sorted(self.credentials)))
+            if role in ("executor", "finalize"):
+                lines.append("TOKENS:")
+                for app, token in sorted(self.credentials.items()):
+                    lines.append(f"  {app}_access_token={token}")
         if self.results:
             lines.append("KNOWN RESULTS: "
                          + "; ".join(f"{k}={str(v)[:60]}" for k, v in self.results.items()))
