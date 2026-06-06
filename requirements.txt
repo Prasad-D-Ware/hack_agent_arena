@@ -1,3 +1,4 @@
 appworld
 openai
 python-dotenv
+hydradb-sdk>=2,<3   # 🐉 optional agent memory/knowledge layer (used when USE_HYDRA=1)
