@@ -8,14 +8,16 @@ Two roles, both optional and fail-safe:
      of solve(); the reasoning loop is never touched.
 
   B) API-doc knowledge — the 457 AppWorld API docs (a static snapshot committed at
-     assets/api_docs.json) are ingested ONCE by the standalone bootstrap_docs.py,
-     OFFLINE, before any run. At run time the agent only QUERIES them via recall(),
-     so ingestion is fully decoupled from the agent loop.
+     assets/api_docs.json) are ensured once with stable ids. bootstrap_docs.py can
+     do that explicitly, and agent.py can do it at startup when Hydra is enabled.
+     Both paths check first and ingest only missing records. During subgoals the
+     agent only QUERIES them via recall().
 
 Run-time behaviour is defensive: if HydraDB is disabled (USE_HYDRA!=1),
-unconfigured (no HYDRA_DB_API_KEY), uninstalled, or erroring, recall() and
-remember_task() degrade to no-ops and the agent runs exactly as before. The
-offline bootstrap is the one place that fails loudly (it's setup, not the run).
+unconfigured (no HYDRA_DB_API_KEY), uninstalled, or erroring, recall(),
+remember_task(), and runtime API-doc ensure degrade safely so the agent can keep
+running. The standalone bootstrap still fails loudly because it is an operator
+setup command.
 
 SDK: pip install "hydradb-sdk>=2,<3"  |  from hydra_db import HydraDB
 Calls: client.tenants.create/status, client.context.ingest/status, client.query.
@@ -26,6 +28,8 @@ import io
 import json
 import os
 import time
+
+DEFAULT_API_DOCS_ARTIFACT = "assets/api_docs.json"
 
 
 def _enabled() -> bool:
@@ -79,6 +83,36 @@ def _status_values(st):
         if s:
             out.append(str(s).lower())
     return out
+
+
+def _status_by_id(st) -> dict:
+    """Extract {document_id: status} from a HydraDB status response if present."""
+    data = _unwrap(st)
+    items = []
+    if isinstance(data, dict):
+        if isinstance(data.get("statuses"), list):
+            items = data["statuses"]
+        elif data and all(isinstance(v, dict) for v in data.values()):
+            for key, value in data.items():
+                item = dict(value)
+                item.setdefault("id", key)
+                items.append(item)
+        else:
+            items = [data]
+    elif isinstance(data, list):
+        items = data
+    out = {}
+    for item in items:
+        doc_id = (_get(item, "id") or _get(item, "document_id")
+                  or _get(item, "source_id") or _get(item, "file_id"))
+        status = _get(item, "indexing_status") or _get(item, "status")
+        if doc_id and status:
+            out[str(doc_id)] = str(status).lower()
+    return out
+
+
+def _looks_indexed(status: str) -> bool:
+    return str(status).lower() in {"completed", "complete", "indexed", "ready", "succeeded", "success"}
 
 
 def _format_api_doc(app: str, api: str, doc) -> str:
@@ -186,7 +220,141 @@ class HydraMemory:
                 return  # unknown shape or network hiccup — don't block
             time.sleep(1)
 
-    # -- B) knowledge ingestion (called ONLY by the offline bootstrap) --------
+    # -- B) knowledge ingestion / ensure -------------------------------------
+    def api_doc_records(self, api_docs: dict) -> list:
+        return _flatten_api_docs(api_docs)
+
+    def api_doc_ingestion_status(self, api_docs: dict, batch_size: int = 100) -> dict:
+        """Best-effort check for which API-doc records are already indexed.
+
+        Returns counts plus missing ids. If HydraDB cannot expose per-id status,
+        falls back to a few knowledge queries for known API names. A query-probe
+        hit is enough to skip re-ingestion because API docs use stable ids.
+        """
+        flat = self.api_doc_records(api_docs)
+        ids = [d["id"] for d in flat]
+        result = {
+            "expected": len(ids),
+            "indexed": 0,
+            "pending": 0,
+            "failed": 0,
+            "missing": ids[:],
+            "unknown": not self.on,
+            "source": "disabled" if not self.on else "status",
+            "probe_hits": 0,
+            "probe_checked": 0,
+        }
+        if not self.on or not ids:
+            return result
+
+        seen = {}
+        status_supported = True
+        for batch in _chunked(ids, batch_size):
+            try:
+                st = self.client.context.status(tenant_id=self.tenant_id, ids=batch)
+            except Exception:
+                status_supported = False
+                break
+            seen.update(_status_by_id(st))
+        if status_supported and seen:
+            indexed = {doc_id for doc_id, status in seen.items() if _looks_indexed(status)}
+            failed = {doc_id for doc_id, status in seen.items() if str(status).lower() == "failed"}
+            pending = set(seen) - indexed - failed
+            missing = [doc_id for doc_id in ids if doc_id not in indexed and doc_id not in pending]
+            result.update({
+                "indexed": len(indexed),
+                "pending": len(pending),
+                "failed": len(failed),
+                "missing": missing,
+                "unknown": False,
+                "source": "status",
+            })
+            return result
+
+        probe = self._api_doc_query_probe(flat)
+        result.update({
+            "probe_hits": probe["hits"],
+            "probe_checked": probe["checked"],
+        })
+        if probe["ok"]:
+            result.update({
+                "indexed": len(ids),
+                "pending": 0,
+                "failed": 0,
+                "missing": [],
+                "unknown": False,
+                "source": "query_probe",
+            })
+        else:
+            result.update({
+                "unknown": False,
+                "source": "query_probe",
+            })
+        return result
+
+    def _api_doc_query_probe(self, flat: list) -> dict:
+        if not self.on or not flat:
+            return {"ok": False, "hits": 0, "checked": 0}
+        by_app = {}
+        for record in flat:
+            by_app.setdefault(record["app"], record)
+        picks = list(by_app.values())
+        hits = 0
+        for d in picks:
+            needle = f"{d['app']}.{d['api']}".lower()
+            try:
+                res = self.client.query(
+                    tenant_id=self.tenant_id,
+                    query=needle,
+                    type="knowledge",
+                    query_by="hybrid",
+                    mode="thinking",
+                    max_results=5,
+                    graph_context=False,
+                )
+            except Exception:
+                return {"ok": False, "hits": hits, "checked": len(picks)}
+            chunks = _get(_unwrap(res), "chunks", []) or []
+            haystack = " ".join(
+                str(_get(c, "chunk_content") or _get(c, "content") or "")
+                + " "
+                + str(_get(c, "source_title") or _get(c, "source_type") or "")
+                for c in chunks
+            ).lower()
+            if needle in haystack or d["id"].lower() in haystack:
+                hits += 1
+        return {"ok": hits == len(picks), "hits": hits, "checked": len(picks)}
+
+    def ensure_api_docs(self, api_docs: dict, batch_size: int = 50,
+                        ingest_on_probe_miss: bool = True) -> tuple:
+        """Ensure API docs are present, ingesting only records missing from HydraDB."""
+        if not self.on:
+            return 0, []
+        flat = self.api_doc_records(api_docs)
+        if not flat:
+            return 0, []
+        status = self.api_doc_ingestion_status(api_docs)
+        expected = status["expected"]
+        if expected and not status["missing"] and not status["failed"]:
+            if status["source"] == "query_probe":
+                print("  [hydra] API docs appear indexed "
+                      f"(query probe {status['probe_hits']}/{status['probe_checked']}); skipping ingest")
+            else:
+                print(f"  [hydra] API docs already indexed ({expected}/{expected}, via {status['source']}); skipping ingest")
+            return 0, [d["id"] for d in flat]
+        if status["source"] == "query_probe" and not ingest_on_probe_miss:
+            print("  [hydra] API docs could not be verified by query probe; skipping auto-ingest")
+            print("  [hydra] run `python bootstrap_docs.py` explicitly if you want to repair/reseed knowledge")
+            return 0, []
+        if status["failed"]:
+            print(f"  [hydra] {status['failed']} API docs previously failed indexing; re-submitting missing/failed docs")
+        missing = set(status["missing"])
+        to_ingest = [d for d in flat if d["id"] in missing] if missing else flat
+        if not to_ingest:
+            return 0, [d["id"] for d in flat]
+        count, ids = self._ingest_api_doc_records(to_ingest, batch_size=batch_size)
+        return count, ids
+
     def ingest_api_docs(self, api_docs: dict, batch_size: int = 50) -> tuple:
         """Ingest the API-doc artifact as one knowledge document per API.
 
@@ -200,7 +368,10 @@ class HydraMemory:
         flat = _flatten_api_docs(api_docs)
         if not flat:
             return 0, []
-        for batch in _chunked(flat, batch_size):
+        return self._ingest_api_doc_records(flat, batch_size=batch_size)
+
+    def _ingest_api_doc_records(self, records: list, batch_size: int = 50) -> tuple:
+        for batch in _chunked(records, batch_size):
             documents, document_metadata = [], []
             for d in batch:
                 body = d["text"].encode("utf-8")
@@ -215,7 +386,7 @@ class HydraMemory:
                 documents=documents,
                 document_metadata=json.dumps(document_metadata),
             )
-        return len(flat), [d["id"] for d in flat]
+        return len(records), [d["id"] for d in records]
 
     def wait_until_indexed(self, ids, timeout: int = 900, poll: int = 5, sample: int = 8) -> bool:
         """Poll context.status on a sample of ids until all 'completed' (or timeout).

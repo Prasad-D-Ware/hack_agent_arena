@@ -17,18 +17,26 @@ cd hack_agent_arena
 bash setup.sh                 # installs uv+py3.11, appworld + data, creates .env; verifies
 source .venv/bin/activate
 ```
-Then add your [OpenRouter](https://openrouter.ai/keys) key to **`.env`**:
+Then add one LLM provider key to **`.env`**. OpenRouter is the default:
 ```
+LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk-or-...
 ```
-Pick any model with the `MODEL` env var using OpenRouter's `provider/model` slugs,
+Or use Groq's OpenAI-compatible endpoint:
+```
+LLM_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+MODEL=llama-3.3-70b-versatile
+```
+Pick any model with the `MODEL` env var. For OpenRouter, use `provider/model` slugs,
 e.g. `anthropic/claude-opus-4`, `openai/gpt-4o`, `google/gemini-2.5-pro`,
-`meta-llama/llama-3.3-70b-instruct`.
+`meta-llama/llama-3.3-70b-instruct`. For Groq, use Groq model ids such as
+`llama-3.3-70b-versatile`.
 > **No key? You can run a local model.** AppWorld itself needs no API key — you can
 > explore tasks (`appworld play`) and hand-solve them fully offline. Only the agent's
-> "brain" needs a model. The starter talks to OpenRouter via the OpenAI-compatible
-> API, so `call_llm` in `agent.py` already works with any OpenAI-compatible host:
-> point `OPENROUTER_BASE_URL` at a local [Ollama](https://ollama.com) or `litellm`
+> "brain" needs a model. The starter uses the OpenAI-compatible API, so `call_llm`
+> works with OpenRouter, Groq, or a local compatible host: point the provider base
+> URL at a local [Ollama](https://ollama.com) or `litellm`
 > server (e.g. `http://localhost:11434/v1`). Small local models score well below
 > frontier models on AppWorld, but they're great for building and debugging your
 > agent loop for free.
@@ -78,11 +86,10 @@ Explore a task world by hand: `appworld play`
 context layer for agents — into the agent in two ways, both at the **edges** of
 the loop (the ReAct reasoning loop itself is never touched):
 - **API-doc knowledge (B):** the 457 AppWorld API docs are a static snapshot
-  committed at [`assets/api_docs.json`](assets/api_docs.json). The standalone,
-  **offline** [`bootstrap_docs.py`](bootstrap_docs.py) ingests them once as
-  `knowledge` (one document per API). At run time the agent only *queries* them —
-  RAG over the 457 APIs — so it skips runtime discovery. Ingestion never runs
-  inside the agent loop.
+  committed at [`assets/api_docs.json`](assets/api_docs.json). Hydra setup uses
+  stable per-API ids and checks first, so [`bootstrap_docs.py`](bootstrap_docs.py)
+  and agent startup ingest only missing `knowledge` records. During subgoals the
+  agent *queries* them — RAG over the 457 APIs — so it skips runtime discovery.
 - **Episodic memory (A):** after each task the agent stores the episode
   (`context.ingest(type="memory")`); before each task it retrieves the most
   relevant past experience (`query`) and injects it into the seed prompt — so it
@@ -94,10 +101,10 @@ erroring, every run-time call is a no-op and the agent behaves exactly as before
 ```bash
 pip install "hydradb-sdk>=2,<3"                 # already in requirements.txt
 
-# 1) ONCE, offline: ingest the API docs (only the key is needed here)
-HYDRA_DB_API_KEY=... python bootstrap_docs.py    # idempotent; waits for indexing
+# 1) Optional explicit ensure: checks first, ingests only missing API docs
+HYDRA_DB_API_KEY=... python bootstrap_docs.py    # idempotent; waits for new indexing
 
-# 2) enable HydraDB for the run
+# 2) enable HydraDB for the run; agent.py also checks/ensures API docs at startup
 export USE_HYDRA=1 HYDRA_DB_API_KEY=...           # key from https://app.hydradb.com
 python agent.py
 ```
