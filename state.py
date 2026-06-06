@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 _ERR_LINE = re.compile(r"^([A-Za-z_][\w.]*(?:Error|Exception|Warning)):\s*(.*)$")
+# Matches HTTP-level API errors like "Response status code is 409: {\"message\":\"...\"}"
+_HTTP_ERR = re.compile(r"Response status code is (\d+):\s*(.*)", re.I)
 
 
 @dataclass
@@ -27,20 +29,36 @@ class StepRecord:
 
 
 def error_signature(output: str) -> str | None:
-    """Return a normalized 'ExcType: msg' for the LAST error line, else None."""
+    """Return a normalized error signature for the LAST error line, else None.
+
+    Handles both Python exceptions (ExcType: msg) and HTTP API errors
+    (Response status code is NNN: ...) so repeated-error detection fires
+    for both kinds of failures.
+    """
     if not output:
         return None
-    match = None
+    py_match = None
+    http_match = None
     for line in str(output).splitlines():
-        m = _ERR_LINE.match(line.strip())
+        stripped = line.strip()
+        m = _ERR_LINE.match(stripped)
         if m:
-            match = m
-    if not match:
-        return None
-    exc, msg = match.group(1), match.group(2)
-    msg = re.sub(r"0x[0-9a-fA-F]+", "#", msg)   # addresses
-    msg = re.sub(r"\d+", "#", msg)              # numbers/ids
-    return f"{exc}: {msg[:80]}"
+            py_match = m
+        h = _HTTP_ERR.search(stripped)
+        if h:
+            http_match = h
+    if py_match:
+        exc, msg = py_match.group(1), py_match.group(2)
+        msg = re.sub(r"0x[0-9a-fA-F]+", "#", msg)
+        msg = re.sub(r"\d+", "#", msg)
+        return f"{exc}: {msg[:80]}"
+    if http_match:
+        status = http_match.group(1)
+        # Normalize the message body: strip IDs/numbers so the same HTTP error
+        # on different resource IDs hashes to the same signature.
+        body = re.sub(r"\d+", "#", http_match.group(2))
+        return f"HTTP {status}: {body[:80]}"
+    return None
 
 
 @dataclass
@@ -94,8 +112,17 @@ class Blackboard:
         if subgoal is not None:
             lines.append(f"CURRENT SUBGOAL: {subgoal.description}")
         if role in ("executor", "finalize", "verifier") and self.steps:
+            # Show up to 5 most-recent steps; for the active subgoal show all its steps
+            # so the executor never loses sight of what it already tried this round.
+            subgoal_id = subgoal.id if subgoal is not None else None
+            if subgoal_id is not None:
+                sg_steps = [s for s in self.steps if s.subgoal_id == subgoal_id]
+                other_steps = [s for s in self.steps[-5:] if s.subgoal_id != subgoal_id]
+                shown = other_steps + sg_steps
+            else:
+                shown = self.steps[-5:]
             lines.append("RECENT STEPS:")
-            for s in self.steps[-3:]:
+            for s in shown:
                 out = s.output if len(s.output) <= 200 else s.output[:200] + "…"
                 lines.append(f"  $ {s.code[:120]}\n    -> {out}")
         return "\n".join(lines)
