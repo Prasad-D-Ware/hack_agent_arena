@@ -28,9 +28,11 @@ Run:
   python agent.py
 
 🐉 Bonus — HydraDB context layer (optional, off by default):
-  export USE_HYDRA=1 HYDRA_DB_API_KEY=...       # see hydradb.py for what it does
+  python bootstrap_docs.py                       # ONCE: ingest the API docs (offline)
+  export USE_HYDRA=1 HYDRA_DB_API_KEY=...        # then enable it for the run
   The agent then remembers what worked across tasks and retrieves relevant past
   experience + API docs before each task. Disabled => the loop runs unchanged.
+  See hydradb.py / bootstrap_docs.py for details.
 """
 
 import os
@@ -105,7 +107,7 @@ def extract_code(text: str) -> str:
 
 def solve(world: AppWorld, mem: HydraMemory) -> None:
     # --- HydraDB hooks live ONLY at the edges; the reasoning loop is untouched. ---
-    mem.ingest_api_docs(world)                       # B) seed API-doc knowledge (once per run)
+    # API-doc knowledge is ingested OFFLINE by bootstrap_docs.py — not here.
     recalled = mem.recall(world.task.instruction)    # A+B) retrieve context for THIS task
 
     intro = (

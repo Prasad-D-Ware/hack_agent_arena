@@ -75,24 +75,34 @@ Explore a task world by hand: `appworld play`
 
 ## 🐉 HydraDB integration (bonus, optional)
 [`hydradb.py`](hydradb.py) wires [HydraDB](https://hydradb.com) — a graph-native
-context layer for agents — into the loop, in two ways:
-- **Episodic memory:** after each task the agent stores a summary of what it did
+context layer for agents — into the agent in two ways, both at the **edges** of
+the loop (the ReAct reasoning loop itself is never touched):
+- **API-doc knowledge (B):** the 457 AppWorld API docs are a static snapshot
+  committed at [`assets/api_docs.json`](assets/api_docs.json). The standalone,
+  **offline** [`bootstrap_docs.py`](bootstrap_docs.py) ingests them once as
+  `knowledge` (one document per API). At run time the agent only *queries* them —
+  RAG over the 457 APIs — so it skips runtime discovery. Ingestion never runs
+  inside the agent loop.
+- **Episodic memory (A):** after each task the agent stores the episode
   (`context.ingest(type="memory")`); before each task it retrieves the most
-  relevant past experience (`query`) and injects it into the prompt — so it stops
-  rediscovering the same APIs and repeating mistakes across tasks.
-- **API-doc knowledge:** once per run it ingests the AppWorld per-app API
-  descriptions as `knowledge`, then retrieves only the relevant ones per task
-  (RAG over the 457 APIs) instead of dumping everything each turn.
+  relevant past experience (`query`) and injects it into the seed prompt — so it
+  stops repeating mistakes across tasks.
 
 It's **off by default** and fully fail-safe — if disabled, unconfigured, or
-erroring, every call is a no-op and the agent behaves exactly as before. Enable it:
+erroring, every run-time call is a no-op and the agent behaves exactly as before.
+
 ```bash
-pip install "hydradb-sdk>=2,<3"        # already in requirements.txt
-export USE_HYDRA=1 HYDRA_DB_API_KEY=...  # key from https://app.hydradb.com
+pip install "hydradb-sdk>=2,<3"                 # already in requirements.txt
+
+# 1) ONCE, offline: ingest the API docs (only the key is needed here)
+HYDRA_DB_API_KEY=... python bootstrap_docs.py    # idempotent; waits for indexing
+
+# 2) enable HydraDB for the run
+export USE_HYDRA=1 HYDRA_DB_API_KEY=...           # key from https://app.hydradb.com
 python agent.py
 ```
-Tunables: `HYDRA_TENANT_ID`, `HYDRA_MAX_RESULTS`, `HYDRA_READY_TIMEOUT` (see
-`.env.example`).
+Tunables: `HYDRA_TENANT_ID`, `HYDRA_MAX_RESULTS`, `HYDRA_CHUNK_CHARS`,
+`HYDRA_READY_TIMEOUT` (see `.env.example`).
 
 ---
 Built for **://agent_arena** · benchmark: [AppWorld](https://github.com/StonyBrookNLP/appworld) (ACL'24 Best Resource Paper)
