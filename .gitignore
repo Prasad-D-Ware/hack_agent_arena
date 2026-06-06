@@ -1,0 +1,12 @@
+# Secrets
+.env
+
+# Python env
+.venv/
+__pycache__/
+*.pyc
+
+# AppWorld runtime artifacts (downloaded / generated locally)
+data/
+experiments/
+logs/
