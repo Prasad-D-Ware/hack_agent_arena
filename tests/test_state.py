@@ -1,5 +1,4 @@
-from state import Subgoal, StepRecord, error_signature
-from state import Blackboard
+from state import Subgoal, StepRecord, error_signature, Blackboard
 
 
 def test_subgoal_defaults():
@@ -95,3 +94,65 @@ def test_render_for_planner_hides_token_values():
     text = bb.render_for("planner")
     assert "amazon" in text
     assert "secret-token" not in text
+
+
+# --- HTTP error signature tests (regression for run-log failures) ---
+
+def test_error_signature_http_409():
+    # Exact pattern from the delete-draft failure loop in the run logs
+    out = 'Error deleting draft 27: Response status code is 409: {"message":"The draft with id 27 does not exist."}'
+    sig = error_signature(out)
+    assert sig is not None
+    assert sig.startswith("HTTP 409")
+    assert "27" not in sig      # numeric ID normalized away
+
+
+def test_error_signature_http_409_same_across_different_ids():
+    # Two 409s on different draft IDs must normalize to the same signature
+    # so has_repeated_error fires and the executor exits early.
+    out1 = 'Response status code is 409: {"message":"The draft with id 27 does not exist."}'
+    out2 = 'Response status code is 409: {"message":"The draft with id 85 does not exist."}'
+    assert error_signature(out1) == error_signature(out2)
+
+
+def test_error_signature_http_401():
+    out = 'Response status code is 401: {"message":"You are either not authorized to access this gmail API endpoint or your access token is missing, invalid or expired."}'
+    sig = error_signature(out)
+    assert sig is not None
+    assert sig.startswith("HTTP 401")
+
+
+def test_has_repeated_error_fires_on_repeated_http_409():
+    # Core regression: executor must bail after 2 identical 409s on same subgoal,
+    # not spin for all 10 steps.
+    bb = Blackboard(task_instruction="t")
+    out = 'Response status code is 409: {"message":"The draft with id 27 does not exist."}'
+    bb.add_step(1, "apis.gmail.delete_draft(draft_id=27, access_token='tok')", out)
+    assert bb.has_repeated_error(1) is False
+    out2 = 'Response status code is 409: {"message":"The draft with id 85 does not exist."}'
+    bb.add_step(1, "apis.gmail.delete_draft(draft_id=85, access_token='tok')", out2)
+    assert bb.has_repeated_error(1) is True
+
+
+def test_has_repeated_error_does_not_fire_across_subgoals():
+    # 409s on different subgoals must not cross-contaminate.
+    bb = Blackboard(task_instruction="t")
+    out = 'Response status code is 409: {"message":"The draft with id 27 does not exist."}'
+    bb.add_step(3, "delete sg3", out)
+    bb.add_step(4, "delete sg4", out)
+    assert bb.has_repeated_error(3) is False
+    assert bb.has_repeated_error(4) is False
+
+
+def test_render_for_shows_all_current_subgoal_steps_on_retry():
+    # When a subgoal is retried, render_for must surface ALL its prior steps
+    # so the executor sees stale IDs it already tried and doesn't repeat them.
+    bb = Blackboard(task_instruction="t")
+    sg = Subgoal(4, "delete empty drafts")
+    for i in range(1, 4):
+        bb.add_step(i, f"code sg{i}", f"out sg{i}")
+    for j in range(5):
+        bb.add_step(4, f"delete attempt {j}", "Response status code is 409: not exist")
+    text = bb.render_for("executor", sg)
+    for j in range(5):
+        assert f"delete attempt {j}" in text, f"step {j} of current subgoal missing from context"
