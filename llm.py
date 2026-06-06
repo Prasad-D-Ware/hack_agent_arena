@@ -18,8 +18,8 @@ def _client() -> OpenAI:
 
 
 def _model_for(role: str) -> str:
-    """MODEL_<ROLE> overrides MODEL; MODEL defaults to a strong slug."""
-    default = os.environ.get("MODEL", "anthropic/claude-opus-4")
+    """MODEL_<ROLE> overrides MODEL; MODEL defaults to a free OpenRouter slug."""
+    default = os.environ.get("MODEL", "meta-llama/llama-3.3-70b-instruct:free")
     return os.environ.get(f"MODEL_{role.upper()}", default)
 
 

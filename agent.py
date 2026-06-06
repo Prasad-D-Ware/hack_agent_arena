@@ -11,6 +11,14 @@ Run:
   export APPWORLD_EXPERIMENT=team_<yourname>
   export APPWORLD_DATASET=dev                  # dev while building
   python agent.py
+
+🐉 Bonus — HydraDB context layer (optional, off by default):
+  python bootstrap_docs.py                       # ONCE: ingest the API docs (offline)
+  export USE_HYDRA=1 HYDRA_DB_API_KEY=...        # then enable it for the run
+  With it enabled the Planner recalls relevant past episodes per task and the
+  Executor retrieves relevant API docs per subgoal. API-doc knowledge is ingested
+  OFFLINE by bootstrap_docs.py — never at run time. Disabled => recall() is a
+  no-op and the loop runs unchanged. See hydradb.py / bootstrap_docs.py.
 """
 import os
 
@@ -29,7 +37,7 @@ from state import Blackboard
 DATASET = os.environ.get("APPWORLD_DATASET", "dev")
 EXPERIMENT = os.environ.get("APPWORLD_EXPERIMENT", "team_demo")
 MAX_TASKS = int(os.environ.get("MAX_TASKS", "0"))   # 0 = all tasks in split
-MODEL = os.environ.get("MODEL", "anthropic/claude-opus-4")
+MODEL = os.environ.get("MODEL", "meta-llama/llama-3.3-70b-instruct:free")
 
 
 def main() -> None:
@@ -42,7 +50,6 @@ def main() -> None:
         print(f"[{i}/{len(task_ids)}] {task_id}")
         with AppWorld(task_id=task_id, experiment_name=EXPERIMENT) as world:
             try:
-                mem.ingest_api_docs(world)   # one-time API-doc knowledge seed
                 state = Blackboard(
                     task_instruction=world.task.instruction,
                     supervisor=world.task.supervisor,
