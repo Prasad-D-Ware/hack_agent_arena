@@ -47,3 +47,42 @@ def test_executor_stops_at_global_budget():
     status, _ = run(sg, bb, FakeWorld(), FakeMem(), llm=llm,
                     max_steps=5, interaction_budget=40)
     assert status == "failed"
+
+
+def test_executor_does_not_execute_empty_code():
+    bb = Blackboard(task_instruction="t")
+    sg = Subgoal(1, "do")
+    llm = FakeLLM({"executor": ["```python\n\n```", "SUBGOAL_DONE: ok"]})
+    world = FakeWorld()
+    status, result = run(sg, bb, world, FakeMem(), llm=llm,
+                         max_steps=3, interaction_budget=40)
+    assert status == "done"
+    assert result == "ok"
+    assert world.executed == []
+    assert bb.interactions_used == 0
+
+
+def test_executor_fails_after_consecutive_empty_replies():
+    bb = Blackboard(task_instruction="t")
+    sg = Subgoal(1, "do")
+    # two empty replies in a row → fail fast, don't burn all 10 steps
+    llm = FakeLLM({"executor": ["<think>hmm</think>", "<think>still thinking</think>"]})
+    world = FakeWorld()
+    status, result = run(sg, bb, world, FakeMem(), llm=llm,
+                         max_steps=10, interaction_budget=40)
+    assert status == "failed"
+    assert "no executable" in result
+    assert world.executed == []
+
+
+def test_executor_reprompts_truncated_code_then_fails():
+    bb = Blackboard(task_instruction="t")
+    sg = Subgoal(1, "do")
+    truncated = '```python\nresult = apis.spotify.show_song(access_token="eyJhbGci\n```'
+    llm = FakeLLM({"executor": [truncated, truncated]})
+    world = FakeWorld()
+    status, result = run(sg, bb, world, FakeMem(), llm=llm,
+                         max_steps=10, interaction_budget=40)
+    assert status == "failed"
+    assert "truncated" in result
+    assert world.executed == []
