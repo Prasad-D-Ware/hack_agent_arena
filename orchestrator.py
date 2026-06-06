@@ -54,11 +54,13 @@ def solve(world, state: Blackboard, mem, llm=call_llm,
                 print(f"  [verify] subgoal {sg.id} {verdict}: {_short(feedback)}", flush=True)
             if ok:
                 sg.status = "done"
+                sg.last_feedback = None
                 i += 1
                 continue
             result = feedback   # verifier overrides into a failure
 
         # failure path
+        sg.last_feedback = result
         sg.attempts += 1
         if sg.attempts <= max_subgoal_retries:
             sg.status = "pending"

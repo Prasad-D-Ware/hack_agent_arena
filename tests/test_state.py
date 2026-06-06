@@ -85,3 +85,13 @@ def test_render_for_lists_logged_in_apps():
     bb.credentials = {"spotify": "tok", "gmail": "tok2"}
     text = bb.render_for("executor", Subgoal(1, "x"))
     assert "spotify" in text and "gmail" in text
+    assert "spotify_access_token=tok" in text
+    assert "gmail_access_token=tok2" in text
+
+
+def test_render_for_planner_hides_token_values():
+    bb = Blackboard(task_instruction="t")
+    bb.credentials = {"amazon": "secret-token"}
+    text = bb.render_for("planner")
+    assert "amazon" in text
+    assert "secret-token" not in text

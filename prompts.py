@@ -23,8 +23,22 @@ RULES:
     print(apis.api_docs.show_api_descriptions(app_name='<app>'))
     print(apis.api_docs.show_api_doc(app_name='<app>', api_name='<api>'))
 - Credentials: print(apis.supervisor.show_account_passwords()) then call the
-  app's login API for an access_token. If the state says you are already logged
-  into an app, reuse that token — do not log in again.
+  app's login API for an access_token. The password rows use lowercase app
+  names such as "amazon", "spotify", and "gmail"; never match on the user's
+  email address. Use a case-insensitive app-name lookup, for example:
+    password = next(p["password"] for p in passwords
+                    if p["account_name"].lower() == "<app>".lower())
+  If the state shows TOKENS such as amazon_access_token=<token>, reuse that
+  exact token in code — do not copy from old outputs, truncate it, or log in
+  again.
+- After any API failure (Response status code, TypeError, KeyError, unexpected
+  keyword, missing field), inspect the exact API doc before retrying:
+    print(apis.api_docs.show_api_doc(app_name='<app>', api_name='<api>'))
+  Then call the API using only documented parameters and fields.
+- For list/history/search APIs, handle pagination completely. Fetch pages until
+  the API returns no items or fewer items than the page_limit. Do not mark a
+  retrieval subgoal done after one page unless the API doc proves there is no
+  pagination. Print the page count, total item count, and stopping condition.
 - Work in small steps and inspect results before the next action.
 - Do NOT call apis.supervisor.complete_task here — finishing is handled separately.
 - When (and only when) the current subgoal is achieved, reply with a single line:
